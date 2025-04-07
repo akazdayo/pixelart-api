@@ -1,12 +1,13 @@
 from fastapi import FastAPI, UploadFile
-from fastapi.responses import FileResponse
-import uvicorn
 import redis.asyncio as redis
 from uuid import uuid4
 import base64
 import cv2
 import numpy as np
-from ai import AI
+from src.ai import AI
+import pixelart_modules as pm
+from numpy.typing import NDArray
+from typing import cast
 
 app = FastAPI()
 pool = redis.ConnectionPool(host="localhost", port=6379, db=0)
@@ -21,13 +22,46 @@ def decode_base64(b64_img):
     return image
 
 
+def resize_image(image):
+    img_size = image.shape[0] * image.shape[1]
+    # 画像をFull HDよりも小さくする
+    ratio = (img_size / 2073600) ** 0.5
+    new_height = int(image.shape[0] / ratio)
+    new_width = int(image.shape[1] / ratio)
+    result = cv2.resize(image, (new_width, new_height))
+    return result
+
+
+def cv_to_base64(img):
+    _, encoded = cv2.imencode(".png", img)
+    img_str = base64.b64encode(encoded).decode("ascii")
+
+    return img_str
+
+
+async def _get_redis(image_id):
+    """Get an image from the server by its ID.
+    This function retrieves the base64 encoded image string from Redis using the provided ID.
+
+    Args:
+        image_id (str): The ID of the image to retrieve.
+
+    Returns:
+        str: Base64 encoded image string.
+    """
+    data = await r.get(image_id)
+    if data is None:
+        return {"error": "Image not found"}
+    return data
+
+
 @app.get("/")
 def read_root():
     return {"Hello": "World"}
 
 
 @app.post("/v1/images/upload")
-def upload(base64_image: str):
+async def upload(upload_image: UploadFile):
     """Upload an image to the server.
     This function takes a base64 encoded image string, generates a unique ID for it,
     and stores it in Redis with a 1-hour expiration time.
@@ -38,49 +72,43 @@ def upload(base64_image: str):
     Returns:
         dict[str, str]: image_id
     """
+    image = upload_image.file.read()
+    cv_image = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
+
+    base64_image = cv_to_base64(cv_image)
+
     id = str(uuid4())
-    response = r.set(
-        id, base64_image.replace("data:image/png;base64,", ""), ex=60 * 60
-    )  # Expire in 1 hour
-    if not response:
-        return {"error": "Failed to upload image"}
+    await r.set(id, base64_image, ex=60 * 60)  # Expire in 1 hour
     return {"image_id": id}
 
 
 @app.post("/v1/images/convert/kmeans")
 async def kmeans(image_id, k: int = 8):
-    data = await r.get(image_id)
-    if data is None:
-        return {"error": "Image not found"}
-
+    data = await _get_redis(image_id)
     img = decode_base64(data)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGBA)
+
     colors = ai.get_color(img, k, 1500)
 
-    return {"cluster": colors}
+    return {
+        "cluster": np.array2string(np.array(colors), separator=",").replace("\n", "")
+    }
 
 
-@app.get("/v1/images/convert")
-def convert(image_id: str, palette: list[list[int]] = []):
-    base64_image = r.get(image_id)
-    if palette == []:  # KMeans Palette
-        pass
+@app.post("/v1/images/convert")
+async def convert(image_id: str, palette: list[list[int]]):
+    data = await _get_redis(image_id)
+    img = decode_base64(data)
 
+    converted = cast(
+        NDArray[np.uint64],
+        pm.convert(img, np.array(palette, dtype=np.uint64)),  # type: ignore
+    )
 
-@app.get("/v1/images/resize")
-def resize(image_id: str, width: int, height: int):
-    pass
-
-
-@app.get("/v1/images/alpha")
-def alpha(image_id):
-    pass
+    b64_img = cv_to_base64(converted)
+    return {"image": f"data:image/png;base64,{b64_img}"}
 
 
 @app.get("/v1/images/get/{image_id}")
-def get_image(image_id: str):
-    return FileResponse(f"images/{image_id}.tiff")
-
-
-if __name__ == "__main__":
-    uvicorn.run("app:app", host="127.0.0.1", port=8000, log_level="info")
+async def get_image(image_id: str):
+    data = await _get_redis(image_id)
+    return {"image": f"data:image/png;base64,{data}"}

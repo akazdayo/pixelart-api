@@ -17,13 +17,7 @@ class AI:
         cluster = KMeans(n_clusters=color, max_iter=iter)
         cluster.fit(X=img)
         cluster_centers_arr = cluster.cluster_centers_.astype(int, copy=False)
-        hexlist = []
-        for rgb_arr in list(self.lab2rgb(cluster_centers_arr)):
-            hexlist.append("#%02x%02x%02x" % tuple(rgb_arr))
-        del img
-        del cluster
-        del cluster_centers_arr
-        return hexlist
+        return list(self.lab2rgb(cluster_centers_arr))
 
     def get_color_count(self, image):
         _, unique_counts = np.unique(image.reshape(-1, 3), axis=0, return_counts=True)

@@ -46,8 +46,7 @@ def main(web):
 
     encoded_img = cv_to_base64(cv2.cvtColor(cimg, cv2.COLOR_BGR2RGB))
 
-    web.col1.image(
-        f"data:image/png;base64,{encoded_img}", use_container_width=True)
+    web.col1.image(f"data:image/png;base64,{encoded_img}", use_container_width=True)
 
     if web.saturation != 1:
         cimg = enhance.saturation(cimg, web.saturation)
@@ -92,8 +91,7 @@ def main(web):
         if web.color == "Custom Palette" or web.color == "AI":
             if web.color == "AI" and web.color != "Custom Palette":
                 web.now.write("### AI Palette in progress")
-                ai_color = ai_palette.get_color(
-                    cimg, web.color_number, web.ai_iter)
+                ai_color = ai_palette.get_color(cimg, web.color_number, web.ai_iter)
                 with st.expander("AI Palette"):
                     web.custom_palette(ai_color)
 
@@ -105,8 +103,7 @@ def main(web):
             cimg = conv.convert(cimg, web.color)
 
     if not web.no_expand:
-        cimg = cv2.resize(
-            cimg, img.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
+        cimg = cv2.resize(cimg, img.shape[:2][::-1], interpolation=cv2.INTER_NEAREST)
 
     if web.decreaseColor:
         web.now.write("### Decrease Color in progress")
@@ -124,10 +121,8 @@ def main(web):
     cimg_rgb = cv2.cvtColor(cimg, cv2.COLOR_BGR2RGB)
     encoded_img = cv_to_base64(cimg_rgb)
 
-    web.col2.image(
-        f"data:image/png;base64,{encoded_img}", use_container_width=True)
-    st.sidebar.image(
-        f"data:image/png;base64,{encoded_img}", use_container_width=True)
+    web.col2.image(f"data:image/png;base64,{encoded_img}", use_container_width=True)
+    st.sidebar.image(f"data:image/png;base64,{encoded_img}", use_container_width=True)
     web.now.write("")
     del conv.color_dict
     gc.collect()

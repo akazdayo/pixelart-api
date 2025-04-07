@@ -16,25 +16,17 @@ class Convert:
             color = [[int(v) for v in row] for row in reader]
             return color
 
-    def convert(self, img, option, custom=None) -> NDArray[np.uint64]:
-        # 選択されたcsvファイルを読み込む
-        color_palette = []
-        if option != "Custom":
-            color_palette = self.read_csv("./color/" + option + ".csv")
-        else:
-            if not custom:
-                raise ValueError("Custom Palette is empty.")
-            color_palette = custom
-
+    def convert(self, img, color_palette) -> NDArray[np.uint64]:
         # convert関数はRustに移しました。
         # https://github.com/akazdayo/pixelart-modules
         changed = cast(
             NDArray[np.uint64],
-            pm.convert(img, np.array(color_palette, dtype=np.uint64)), # type: ignore
+            pm.convert(img, np.array(color_palette, dtype=np.uint64)),  # type: ignore
         )
         return changed
 
-    def resize_image(self, image):
+    @staticmethod
+    def resize_image(image):
         img_size = image.shape[0] * image.shape[1]
         # 画像をFull HDよりも小さくする
         ratio = (img_size / 2073600) ** 0.5
