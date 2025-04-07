@@ -2,5 +2,6 @@
     "files.associations": {
         "*.py": "python",
         "vector": "cpp"
-    }
+    },
+    "python.analysis.autoImportCompletions": true
 }

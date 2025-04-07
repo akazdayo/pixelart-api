@@ -41,6 +41,8 @@ pydantic==2.11.2
     # via fastapi
 pydantic-core==2.33.1
     # via pydantic
+redis==5.2.1
+    # via pixelart
 scikit-learn==1.6.1
     # via pixelart
 scipy==1.15.2
