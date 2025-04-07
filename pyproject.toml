@@ -1,0 +1,36 @@
+[project]
+name = "pixelart"
+version = "0.1.0"
+description = "pixelart converter"
+authors = [
+    { name = "akazdayo", email = "82073147+akazdayo@users.noreply.github.com" },
+]
+dependencies = [
+    "opencv-python-headless>=4.11.0.86",
+    "numpy>=2.2.4",
+    "pillow>=11.1.0",
+    "scikit-learn>=1.6.1",
+    "pixelart-modules>=0.1.0",
+    "fastapi>=0.115.12",
+    "uvicorn>=0.34.0",
+]
+readme = "README.md"
+requires-python = ">= 3.12"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.rye]
+managed = true
+dev-dependencies = ["ruff>=0.11.2", "opencv-python>=4.11.0.86"]
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pixelart"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
