@@ -1,42 +1,18 @@
 from fastapi import FastAPI, UploadFile
 import redis.asyncio as redis
 from uuid import uuid4
-import base64
 import cv2
 import numpy as np
 from src.ai import AI
 import pixelart_modules as pm
 from numpy.typing import NDArray
 from typing import cast
+import src.utils.images as img_utils
 
 app = FastAPI()
 pool = redis.ConnectionPool(host="localhost", port=6379, db=0)
 r = redis.Redis(connection_pool=pool)
 ai = AI()
-
-
-def decode_base64(b64_img):
-    img_bytes = base64.b64decode(b64_img.decode("utf-8"))
-    image_array = np.asarray(bytearray(img_bytes), dtype=np.uint8)
-    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
-    return image
-
-
-def resize_image(image):
-    img_size = image.shape[0] * image.shape[1]
-    # 画像をFull HDよりも小さくする
-    ratio = (img_size / 2073600) ** 0.5
-    new_height = int(image.shape[0] / ratio)
-    new_width = int(image.shape[1] / ratio)
-    result = cv2.resize(image, (new_width, new_height))
-    return result
-
-
-def cv_to_base64(img):
-    _, encoded = cv2.imencode(".png", img)
-    img_str = base64.b64encode(encoded).decode("ascii")
-
-    return img_str
 
 
 async def _get_redis(image_id):
@@ -75,17 +51,26 @@ async def upload(upload_image: UploadFile):
     image = upload_image.file.read()
     cv_image = cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR)
 
-    base64_image = cv_to_base64(cv_image)
+    base64_image = img_utils.cv_to_base64(cv_image)
 
     id = str(uuid4())
-    await r.set(id, base64_image, ex=60 * 60)  # Expire in 1 hour
+    await r.set(id, base64_image, ex=60 * 5)  # Expire in 5 minutes
     return {"image_id": id}
 
 
 @app.post("/v1/images/convert/kmeans")
-async def kmeans(image_id, k: int = 8):
+async def kmeans(image_id: str, k: int = 8):
+    """Sampling colors from an image using K-means clustering.
+
+    Args:
+        image_id (str): _description_.
+        k (int, optional): _description_. Defaults to 8.
+
+    Returns:
+        dict[str, str]: {"cluster": [[int, int, int], ...]}
+    """
     data = await _get_redis(image_id)
-    img = decode_base64(data)
+    img = img_utils.decode_base64(data)
 
     colors = ai.get_color(img, k, 1500)
 
@@ -96,19 +81,22 @@ async def kmeans(image_id, k: int = 8):
 
 @app.post("/v1/images/convert")
 async def convert(image_id: str, palette: list[list[int]]):
+    """Convert an image to a pixel art style color using a given palette.
+
+    Args:
+        image_id (str): _description_
+        palette (list[list[int]]): _description_
+
+    Returns:
+        _type_: _description_
+    """
     data = await _get_redis(image_id)
-    img = decode_base64(data)
+    img = img_utils.decode_base64(data)
 
     converted = cast(
         NDArray[np.uint64],
         pm.convert(img, np.array(palette, dtype=np.uint64)),  # type: ignore
     )
 
-    b64_img = cv_to_base64(converted)
+    b64_img = img_utils.cv_to_base64(converted)
     return {"image": f"data:image/png;base64,{b64_img}"}
-
-
-@app.get("/v1/images/get/{image_id}")
-async def get_image(image_id: str):
-    data = await _get_redis(image_id)
-    return {"image": f"data:image/png;base64,{data}"}
