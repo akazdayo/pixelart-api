@@ -16,13 +16,27 @@ from src.exceptions import (
     RedisConnectionError,
 )
 import logging
+import os
 
 # ロガーの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-pool = redis.ConnectionPool(host="localhost", port=6379, db=0)
+
+# 環境変数からRedis接続情報を取得
+redis_host = os.getenv("REDIS_HOST", "localhost")
+redis_port = int(os.getenv("REDIS_PORT", "6379"))
+redis_password = os.getenv("REDIS_PASSWORD", None)
+
+# Redis接続プールの設定
+pool = redis.ConnectionPool(
+    host=redis_host,
+    port=redis_port,
+    password=redis_password,
+    db=0,
+    decode_responses=False,
+)
 r = redis.Redis(connection_pool=pool)
 ai = AI()
 
