@@ -1,4 +1,5 @@
-from fastapi import FastAPI, UploadFile, Request
+from fastapi import FastAPI, UploadFile, Request, Body
+from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 import redis.asyncio as redis
 from uuid import uuid4
@@ -17,7 +18,9 @@ from src.exceptions import (
 )
 import logging
 import os
+import src.filters as filters
 
+edges = filters.EdgeFilter()
 # ロガーの設定
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,6 +28,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # 環境変数からRedis接続情報を取得
+print(os.getenv("REDIS_PORT", "6379"))
 redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_port = int(os.getenv("REDIS_PORT", "6379"))
 redis_password = os.getenv("REDIS_PASSWORD", None)
@@ -105,7 +109,7 @@ async def upload(upload_image: UploadFile) -> Dict[str, str]:
 
         id = str(uuid4())
         try:
-            await r.set(id, base64_image, ex=60 * 5)  # Expire in 5 minutes
+            await r.set(id, base64_image, ex=60)  # Expire in 5 minutes
         except redis.ConnectionError as e:
             logger.error(f"Redis connection error: {str(e)}")
             raise RedisConnectionError()
@@ -185,7 +189,8 @@ async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
             )
 
         b64_img = img_utils.cv_to_base64(converted)
-        return {"image": f"data:image/png;base64,{b64_img}"}
+        await r.set(image_id, b64_img, ex=60)
+        return {"status": "success"}
     except (ImageNotFoundError, RedisConnectionError):
         raise
     except Exception as e:
@@ -193,3 +198,84 @@ async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
         raise ImageProcessingError(
             "Failed to process image conversion", {"error": str(e)}
         )
+
+
+@app.post("/v1/images/convert/dog")
+async def dog(image_id: str):
+    data = await _get_redis(image_id)
+    img = img_utils.decode_base64(data)
+    result = edges.dog(img)
+    b64_img = img_utils.cv_to_base64(result)
+    await r.set(image_id, b64_img, ex=60)  # Expire in 5 minutes
+    return {"status": "success"}
+
+
+@app.get("/v1/images/{image_id}")
+async def get_img(image_id):
+    """Get an image from Redis by its ID.
+
+    Args:
+        image_id (str): The ID of the image to retrieve.
+
+    Returns:
+        JSONResponse: JSON response containing the image data.
+
+    Raises:
+        ImageNotFoundError: If the image is not found.
+        RedisConnectionError: If there is an error connecting to Redis.
+    """
+    try:
+        data = await _get_redis(image_id)
+        return {"image": data}
+    except (ImageNotFoundError, RedisConnectionError):
+        raise
+
+
+class ImageSetRequest(BaseModel):
+    image_data: str
+
+
+@app.post("/v1/images/set")
+async def set_img(image_id: str, request: ImageSetRequest):
+    """Set an image in Redis by its ID using request body.
+
+    Args:
+        image_id (str): The ID of the image to set.
+        image_data (str): Base64 encoded image data.
+
+    Returns:
+        Dict[str, str]: Dictionary containing a success message.
+
+    Raises:
+        RedisConnectionError: If there is an error connecting to Redis.
+    """
+    try:
+        await r.set(image_id, request.image_data, ex=60)  # Expire in 5 minutes
+        return {"message": "Image set successfully"}
+    except redis.ConnectionError as e:
+        logger.error(f"Redis connection error: {str(e)}")
+        raise RedisConnectionError()
+    except Exception as e:
+        logger.error(f"Error setting image: {str(e)}")
+
+
+@app.get("/v1/images/delete/{image_id}")
+async def delete_image(image_id: str):
+    """Delete an image from Redis by its ID.
+
+    Args:
+        image_id (str): The ID of the image to delete.
+
+    Returns:
+        Dict[str, str]: Dictionary containing a success message.
+
+    Raises:
+        ImageNotFoundError: If the image is not found.
+        RedisConnectionError: If there is an error connecting to Redis.
+    """
+    try:
+        await r.delete(image_id)
+        return {"message": "Image deleted successfully"}
+    except redis.ConnectionError as e:
+        logger.error(f"Redis connection error: {str(e)}")
+        raise RedisConnectionError()
