@@ -28,16 +28,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI()
 
 # 環境変数からRedis接続情報を取得
-print(os.getenv("REDIS_PORT", "6379"))
-redis_host = os.getenv("REDIS_HOST", "localhost")
-redis_port = int(os.getenv("REDIS_PORT", "6379"))
-redis_password = os.getenv("REDIS_PASSWORD", None)
+# print(os.getenv("REDIS_PORT", "6379"))
+# redis_host = os.getenv("REDIS_HOST", "localhost")
+# redis_port = int(os.getenv("REDIS_PORT", "6379"))
+# redis_password = os.getenv("REDIS_PASSWORD", None)
 
 # Redis接続プールの設定
 pool = redis.ConnectionPool(
-    host=redis_host,
-    port=redis_port,
-    password=redis_password,
+    host="localhost",
+    port=6379,
+    password=None,
     db=0,
     decode_responses=False,
 )
@@ -207,6 +207,16 @@ async def dog(image_id: str):
     result = edges.dog(img)
     b64_img = img_utils.cv_to_base64(result)
     await r.set(image_id, b64_img, ex=60)  # Expire in 5 minutes
+    return {"status": "success"}
+
+
+@app.post("/v1/images/convert/morphology")
+async def morphology(image_id: str):
+    data = await _get_redis(image_id)
+    img = img_utils.decode_base64(data)
+    result = edges.morphology_erode(img)
+    b64_img = img_utils.cv_to_base64(result)
+    await r.set(image_id, b64_img, ex=60)
     return {"status": "success"}
 
 
