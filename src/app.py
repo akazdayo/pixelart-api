@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, Request, Body
+from fastapi import FastAPI, UploadFile, Request
 from pydantic import BaseModel
 from fastapi.responses import JSONResponse
 import redis.asyncio as redis
 from uuid import uuid4
 import cv2
 import numpy as np
+from sklearn.cluster import KMeans
 from src.ai import AI
 import pixelart_modules as pm
 from numpy.typing import NDArray
@@ -52,6 +53,15 @@ async def pixelart_exception_handler(
     """カスタム例外のハンドラー"""
     logger.error(f"Error occurred: {exc.detail}")
     return JSONResponse(status_code=exc.status_code, content=exc.detail)
+
+
+class Base64Upload(BaseModel):
+    image: str
+
+
+class KMeansRequest(BaseModel):
+    image_id: str
+    k: int = 8
 
 
 async def _get_redis(image_id: str) -> bytes:
@@ -120,8 +130,33 @@ async def upload(upload_image: UploadFile) -> Dict[str, str]:
         raise ImageProcessingError("Failed to process image", {"error": str(e)})
 
 
+@app.post("/v1/images/upload_base64")
+async def upload_base64(request: Base64Upload) -> Dict[str, str]:
+    """Upload a base64 encoded image to the server.
+    This function takes a base64 encoded image string, generates a unique ID for it,
+    and stores it in Redis with a 5-minute expiration time.
+
+    Args:
+        image (str): Base64 encoded image string.
+
+    Returns:
+        Dict[str, str]: Dictionary containing the image_id.
+
+    Raises:
+        ImageProcessingError: If there is an error processing the image.
+        RedisConnectionError: If there is an error connecting to Redis.
+    """
+    try:
+        id = str(uuid4())
+        await r.set(id, request.image, ex=60)  # Expire in 5 minutes
+        return {"image_id": id}
+    except redis.ConnectionError as e:
+        logger.error(f"Redis connection error: {str(e)}")
+        raise RedisConnectionError()
+
+
 @app.post("/v1/images/convert/kmeans")
-async def kmeans(image_id: str, k: int = 8) -> Dict[str, str]:
+async def kmeans(request: KMeansRequest) -> Dict[str, str]:
     """Sampling colors from an image using K-means clustering.
 
     Args:
@@ -136,12 +171,12 @@ async def kmeans(image_id: str, k: int = 8) -> Dict[str, str]:
         ImageProcessingError: If there is an error processing the image.
     """
     try:
-        data = await _get_redis(image_id)
+        data = await _get_redis(request.image_id)
         img = img_utils.decode_base64(data)
         if img is None:
             raise ImageProcessingError("Failed to decode base64 image")
 
-        colors = ai.get_color(img, k, 1500)
+        colors = ai.get_color(img, request.k, 1500)
         return {
             "cluster": np.array2string(np.array(colors), separator=",").replace(
                 "\n", ""
