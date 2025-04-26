@@ -5,6 +5,7 @@ import redis.asyncio as redis
 from uuid import uuid4
 import cv2
 import numpy as np
+import ast
 from sklearn.cluster import KMeans
 from src.ai import AI
 import pixelart_modules as pm
@@ -62,6 +63,11 @@ class Base64Upload(BaseModel):
 class KMeansRequest(BaseModel):
     image_id: str
     k: int = 8
+
+
+class ConvertRequest(BaseModel):
+    image_id: str
+    palette: str
 
 
 async def _get_redis(image_id: str) -> bytes:
@@ -192,7 +198,7 @@ async def kmeans(request: KMeansRequest) -> Dict[str, str]:
 
 
 @app.post("/v1/images/convert")
-async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
+async def convert(request: ConvertRequest) -> Dict[str, str]:
     """Convert an image to a pixel art style color using a given palette.
 
     Args:
@@ -207,15 +213,16 @@ async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
         ImageProcessingError: If there is an error processing the image.
     """
     try:
-        data = await _get_redis(image_id)
+        data = await _get_redis(request.image_id)
         img = img_utils.decode_base64(data)
+        _palette = np.array(ast.literal_eval(request.palette), dtype=np.uint64)
         if img is None:
             raise ImageProcessingError("Failed to decode base64 image")
 
         try:
             converted = cast(
                 NDArray[np.uint64],
-                pm.convert(img, np.array(palette, dtype=np.uint64)),  # type: ignore
+                pm.convert(img, np.array(_palette, dtype=np.uint64)),  # type: ignore
             )
         except Exception as e:
             logger.error(f"Error in pixel art conversion: {str(e)}")
@@ -224,7 +231,7 @@ async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
             )
 
         b64_img = img_utils.cv_to_base64(converted)
-        await r.set(image_id, b64_img, ex=60)
+        await r.set(request.image_id, b64_img, ex=60)
         return {"status": "success"}
     except (ImageNotFoundError, RedisConnectionError):
         raise
@@ -235,7 +242,7 @@ async def convert(image_id: str, palette: list[list[int]]) -> Dict[str, str]:
         )
 
 
-@app.post("/v1/images/convert/dog")
+@app.get("/v1/images/convert/dog")
 async def dog(image_id: str):
     data = await _get_redis(image_id)
     img = img_utils.decode_base64(data)
@@ -245,7 +252,7 @@ async def dog(image_id: str):
     return {"status": "success"}
 
 
-@app.post("/v1/images/convert/morphology")
+@app.get("/v1/images/convert/morphology")
 async def morphology(image_id: str):
     data = await _get_redis(image_id)
     img = img_utils.decode_base64(data)
@@ -277,11 +284,12 @@ async def get_img(image_id):
 
 
 class ImageSetRequest(BaseModel):
+    image_id: str
     image_data: str
 
 
 @app.post("/v1/images/set")
-async def set_img(image_id: str, request: ImageSetRequest):
+async def set_img(request: ImageSetRequest):
     """Set an image in Redis by its ID using request body.
 
     Args:
@@ -295,7 +303,7 @@ async def set_img(image_id: str, request: ImageSetRequest):
         RedisConnectionError: If there is an error connecting to Redis.
     """
     try:
-        await r.set(image_id, request.image_data, ex=60)  # Expire in 5 minutes
+        await r.set(request.image_id, request.image_data, ex=60)  # Expire in 5 minutes
         return {"message": "Image set successfully"}
     except redis.ConnectionError as e:
         logger.error(f"Redis connection error: {str(e)}")
@@ -324,3 +332,40 @@ async def delete_image(image_id: str):
     except redis.ConnectionError as e:
         logger.error(f"Redis connection error: {str(e)}")
         raise RedisConnectionError()
+
+
+class SaturationRequest(BaseModel):
+    image_id: str
+    value: float
+
+
+@app.get("/v1/images/enchance/saturation")
+async def saturation(req: SaturationRequest):
+    data = await _get_redis(req.image_id)
+    img = img_utils.decode_base64(data)
+    conv = filters.ImageEnhancer.saturation(img, req.value)
+    result = img_utils.cv_to_base64(conv)
+    await r.set(req.image_id, result, ex=60)
+    return {"status": "success"}
+
+
+@app.get("/v1/images/convert/gaussian")
+async def gaussian(image_id: str):
+    data = await _get_redis(image_id)
+    img = img_utils.decode_base64(data)
+    result = cv2.GaussianBlur(
+        img,  # 入力画像
+        (5, 5),  # カーネルの縦幅・横幅
+        2,  # 横方向の標準偏差（0を指定すると、カーネルサイズから自動計算）
+    )
+    b64_img = img_utils.cv_to_base64(result)
+    await r.set(image_id, b64_img, ex=60)
+
+
+@app.get("/v1/images/convert/median")
+async def median(image_id: str, size: int):
+    data = await _get_redis(image_id)
+    img = img_utils.decode_base64(data)
+    result = edges.median(img, size)
+    b64_img = img_utils.cv_to_base64(result)
+    await r.set(image_id, b64_img, ex=60)

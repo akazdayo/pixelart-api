@@ -134,7 +134,8 @@ class ImageEnhancer:
     def __init__(self) -> None:
         pass
 
-    def saturation(self, image, value):
+    @staticmethod
+    def saturation(image, value):
         img = Image.fromarray(image)
         enhancer = ImageEnhance.Color(img)
         result = enhancer.enhance(value)
